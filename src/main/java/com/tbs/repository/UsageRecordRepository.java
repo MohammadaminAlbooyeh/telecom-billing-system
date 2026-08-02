@@ -16,5 +16,12 @@ public interface UsageRecordRepository extends JpaRepository<UsageRecord, Long> 
     List<UsageRecord> findBySubscriberIdAndRatedTrueAndUsageStartTimeBetween(
             Long subscriberId, LocalDateTime start, LocalDateTime end);
 
+    List<UsageRecord> findBySubscriberIdAndUsageStartTimeBetween(
+            Long subscriberId, LocalDateTime start, LocalDateTime end);
+
+    List<UsageRecord> findByRatedFalse();
+
+    List<UsageRecord> findBySubscriberIdAndRatedFalse(Long subscriberId);
+
     long countBySubscriberIdAndRatedFalse(Long subscriberId);
 }
