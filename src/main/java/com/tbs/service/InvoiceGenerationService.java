@@ -8,6 +8,7 @@ import com.tbs.model.entity.RatedUsage;
 import com.tbs.model.entity.Subscriber;
 import com.tbs.model.entity.UsageRecord;
 import com.tbs.model.enums.InvoiceStatus;
+import com.tbs.messaging.InvoiceEventProducer;
 import com.tbs.repository.InvoiceRepository;
 import com.tbs.repository.RatedUsageRepository;
 import com.tbs.repository.SubscriberRepository;
@@ -31,15 +32,18 @@ public class InvoiceGenerationService {
     private final SubscriberRepository subscriberRepository;
     private final UsageRecordRepository usageRecordRepository;
     private final RatedUsageRepository ratedUsageRepository;
+    private final InvoiceEventProducer invoiceEventProducer;
 
     public InvoiceGenerationService(InvoiceRepository invoiceRepository,
                                     SubscriberRepository subscriberRepository,
                                     UsageRecordRepository usageRecordRepository,
-                                    RatedUsageRepository ratedUsageRepository) {
+                                    RatedUsageRepository ratedUsageRepository,
+                                    InvoiceEventProducer invoiceEventProducer) {
         this.invoiceRepository = invoiceRepository;
         this.subscriberRepository = subscriberRepository;
         this.usageRecordRepository = usageRecordRepository;
         this.ratedUsageRepository = ratedUsageRepository;
+        this.invoiceEventProducer = invoiceEventProducer;
     }
 
     @Transactional
@@ -87,7 +91,9 @@ public class InvoiceGenerationService {
 
         invoice.setTotalAmount(total);
         invoice.setStatus(InvoiceStatus.DRAFT);
-        return invoiceRepository.save(invoice);
+        Invoice saved = invoiceRepository.save(invoice);
+        invoiceEventProducer.publishInvoiceCreated(saved);
+        return saved;
     }
 
     @Transactional

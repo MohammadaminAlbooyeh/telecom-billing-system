@@ -8,6 +8,7 @@ import com.tbs.model.entity.Subscriber;
 import com.tbs.model.entity.UsageRecord;
 import com.tbs.model.enums.InvoiceStatus;
 import com.tbs.model.enums.UsageType;
+import com.tbs.messaging.InvoiceEventProducer;
 import com.tbs.repository.InvoiceRepository;
 import com.tbs.repository.RatedUsageRepository;
 import com.tbs.repository.SubscriberRepository;
@@ -27,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -43,6 +45,9 @@ class InvoiceGenerationServiceTest {
 
     @Mock
     private RatedUsageRepository ratedUsageRepository;
+
+    @Mock
+    private InvoiceEventProducer invoiceEventProducer;
 
     @InjectMocks
     private InvoiceGenerationService invoiceGenerationService;
@@ -72,6 +77,7 @@ class InvoiceGenerationServiceTest {
         assertThat(invoice.getIssueDate()).isNotNull();
         assertThat(invoice.getDueDate()).isNotNull();
         assertThat(invoice.getInvoiceNumber()).startsWith("INV-");
+        verify(invoiceEventProducer).publishInvoiceCreated(invoice);
     }
 
     @Test

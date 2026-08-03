@@ -46,7 +46,7 @@ mvn spring-boot:run
 
 - Starts on `http://localhost:8080`
 - Uses an in-memory H2 database with `ddl-auto: create-drop`
-- Kafka is configured but not exercised (`messaging` classes are currently stubs)
+- Kafka messaging is wired: the `cdr-events` topic is consumed and invoice events are published. Without a running broker at `localhost:9092` the app still starts (after a ~45s Kafka admin timeout) but messaging is inactive — use the Docker stack for a functional broker.
 
 The app boots with an empty schema; entities and data are created via the API.
 
@@ -151,6 +151,27 @@ Flyway migrations live in `src/main/resources/db/migration/`:
 | V6 | `rated_usage` |
 | V7 | `invoice_line_items` |
 
+## Kafka Messaging
+
+Spring Kafka is used for event-driven CDR ingestion and invoice notifications. Topics are declared in `KafkaConfig` and auto-created by the KafkaAdmin when a broker is available.
+
+| Topic | Publisher | Consumer | Payload |
+|-------|-----------|----------|---------|
+| `cdr-events` | external producers | `CdrEventConsumer` | Raw comma-separated CDR string (e.g. `cdr-1,989120000000,CALL,2026-03-10T10:00:00,5,,,`) |
+| `invoice-events` | `InvoiceEventProducer` | — | JSON with `invoiceNumber`, `subscriberId`, `msisdn`, `totalAmount`, `status` |
+
+**Flow:** On invoice generation, `InvoiceGenerationService` calls `InvoiceEventProducer` to publish an `invoice-events` message. CDRs published to `cdr-events` are consumed by `CdrEventConsumer`, which delegates each raw line to `CdrIngestionService` (parse → validate → dedupe → persist). A bad record is logged and skipped without stopping the consumer.
+
+**Supported endpoints for manual ingestion:** `POST /api/usage/cdr` (raw) and `POST /api/usage` (JSON) bypass Kafka and ingest directly.
+
+To publish a CDR to the topic manually:
+
+```bash
+# pipe one raw CDR per line into the console producer (Docker Kafka)
+docker exec -i tbs-kafka kafka-console-producer.sh \
+  --broker-list localhost:9092 --topic cdr-events
+```
+
 ## Useful Actuator Endpoints
 
 - `http://localhost:8080/actuator/health`
@@ -158,6 +179,7 @@ Flyway migrations live in `src/main/resources/db/migration/`:
 
 ## Notes / Current Limitations
 
-- Kafka producer/consumer classes are empty stubs; message-based CDR ingestion is not yet wired end-to-end.
+- Kafka messaging (`KafkaConfig`, `CdrEventConsumer`, `InvoiceEventProducer`) is implemented and wired. Startup requires a broker for messaging to be active; the admin/consumer will retry connection if one is absent.
+- The Spring Batch classes (`MonthlyInvoiceJob`, `UsageAggregationTasklet`, `InvoiceItemWriter`, `BatchConfig`) are still empty stubs — the monthly invoice batch job is not yet implemented.
 - The default H2 profile uses `create-drop`; use the `postgres` profile (or Docker) for persistent schema managed by Flyway.
 
