@@ -1,6 +1,7 @@
 package com.tbs.service;
 
 import com.tbs.exception.SubscriberNotFoundException;
+import com.tbs.metrics.BusinessMetrics;
 import com.tbs.model.entity.Invoice;
 import com.tbs.model.entity.InvoiceLineItem;
 import com.tbs.model.entity.Plan;
@@ -13,6 +14,7 @@ import com.tbs.repository.InvoiceRepository;
 import com.tbs.repository.RatedUsageRepository;
 import com.tbs.repository.SubscriberRepository;
 import com.tbs.repository.UsageRecordRepository;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,67 +35,79 @@ public class InvoiceGenerationService {
     private final UsageRecordRepository usageRecordRepository;
     private final RatedUsageRepository ratedUsageRepository;
     private final InvoiceEventProducer invoiceEventProducer;
+    private final BusinessMetrics businessMetrics;
 
     public InvoiceGenerationService(InvoiceRepository invoiceRepository,
                                     SubscriberRepository subscriberRepository,
                                     UsageRecordRepository usageRecordRepository,
                                     RatedUsageRepository ratedUsageRepository,
-                                    InvoiceEventProducer invoiceEventProducer) {
+                                    InvoiceEventProducer invoiceEventProducer,
+                                    BusinessMetrics businessMetrics) {
         this.invoiceRepository = invoiceRepository;
         this.subscriberRepository = subscriberRepository;
         this.usageRecordRepository = usageRecordRepository;
         this.ratedUsageRepository = ratedUsageRepository;
         this.invoiceEventProducer = invoiceEventProducer;
+        this.businessMetrics = businessMetrics;
     }
 
     @Transactional
     public Invoice generateInvoice(Long subscriberId, LocalDate periodStart, LocalDate periodEnd) {
-        Subscriber subscriber = subscriberRepository.findById(subscriberId)
-                .orElseThrow(() -> new SubscriberNotFoundException(subscriberId));
-        if (invoiceRepository.existsBySubscriberIdAndBillingPeriodEnd(subscriberId, periodEnd)) {
-            throw new IllegalStateException("Invoice already generated for subscriber " + subscriberId
-                    + " for period ending " + periodEnd);
+        Timer.Sample sample = businessMetrics.startInvoiceGenerationTimer();
+        try {
+            Subscriber subscriber = subscriberRepository.findById(subscriberId)
+                    .orElseThrow(() -> new SubscriberNotFoundException(subscriberId));
+            if (invoiceRepository.existsBySubscriberIdAndBillingPeriodEnd(subscriberId, periodEnd)) {
+                throw new IllegalStateException("Invoice already generated for subscriber " + subscriberId
+                        + " for period ending " + periodEnd);
+            }
+
+            List<UsageRecord> ratedUsage = usageRecordRepository.findBySubscriberIdAndRatedTrueAndUsageStartTimeBetween(
+                    subscriberId, periodStart.atStartOfDay(), periodEnd.plusDays(1).atStartOfDay());
+
+            Invoice invoice = new Invoice();
+            invoice.setSubscriber(subscriber);
+            invoice.setBillingPeriodStart(periodStart);
+            invoice.setBillingPeriodEnd(periodEnd);
+            invoice.setIssueDate(LocalDate.now());
+            invoice.setDueDate(LocalDate.now().plusDays(DEFAULT_PAYMENT_TERMS_DAYS));
+            invoice.setInvoiceNumber(generateInvoiceNumber());
+
+            BigDecimal total = BigDecimal.ZERO;
+            for (UsageRecord usage : ratedUsage) {
+                RatedUsage rated = ratedUsageRepository.findByUsageRecordId(usage.getId())
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Rated usage not found for usage record " + usage.getId()));
+                InvoiceLineItem lineItem = new InvoiceLineItem();
+                lineItem.setRatedUsage(rated);
+                lineItem.setUsageType(usage.getUsageType());
+                lineItem.setDescription(describe(usage));
+                lineItem.setAmount(rated.getTotalCharge());
+                invoice.addLineItem(lineItem);
+                total = total.add(rated.getTotalCharge());
+            }
+
+            Plan plan = subscriber.getPlan();
+            if (plan.getMonthlyFee() != null && plan.getMonthlyFee().signum() > 0) {
+                InvoiceLineItem feeLine = new InvoiceLineItem();
+                feeLine.setDescription("Monthly subscription fee - " + plan.getName());
+                feeLine.setAmount(plan.getMonthlyFee());
+                invoice.addLineItem(feeLine);
+                total = total.add(plan.getMonthlyFee());
+            }
+
+            invoice.setTotalAmount(total);
+            invoice.setStatus(InvoiceStatus.DRAFT);
+            Invoice saved = invoiceRepository.save(invoice);
+            invoiceEventProducer.publishInvoiceCreated(saved);
+            businessMetrics.incrementInvoicesGenerated();
+            return saved;
+        } catch (Exception e) {
+            businessMetrics.incrementInvoicesFailed();
+            throw e;
+        } finally {
+            businessMetrics.stopInvoiceGenerationTimer(sample);
         }
-
-        List<UsageRecord> ratedUsage = usageRecordRepository.findBySubscriberIdAndRatedTrueAndUsageStartTimeBetween(
-                subscriberId, periodStart.atStartOfDay(), periodEnd.plusDays(1).atStartOfDay());
-
-        Invoice invoice = new Invoice();
-        invoice.setSubscriber(subscriber);
-        invoice.setBillingPeriodStart(periodStart);
-        invoice.setBillingPeriodEnd(periodEnd);
-        invoice.setIssueDate(LocalDate.now());
-        invoice.setDueDate(LocalDate.now().plusDays(DEFAULT_PAYMENT_TERMS_DAYS));
-        invoice.setInvoiceNumber(generateInvoiceNumber());
-
-        BigDecimal total = BigDecimal.ZERO;
-        for (UsageRecord usage : ratedUsage) {
-            RatedUsage rated = ratedUsageRepository.findByUsageRecordId(usage.getId())
-                    .orElseThrow(() -> new IllegalStateException(
-                            "Rated usage not found for usage record " + usage.getId()));
-            InvoiceLineItem lineItem = new InvoiceLineItem();
-            lineItem.setRatedUsage(rated);
-            lineItem.setUsageType(usage.getUsageType());
-            lineItem.setDescription(describe(usage));
-            lineItem.setAmount(rated.getTotalCharge());
-            invoice.addLineItem(lineItem);
-            total = total.add(rated.getTotalCharge());
-        }
-
-        Plan plan = subscriber.getPlan();
-        if (plan.getMonthlyFee() != null && plan.getMonthlyFee().signum() > 0) {
-            InvoiceLineItem feeLine = new InvoiceLineItem();
-            feeLine.setDescription("Monthly subscription fee - " + plan.getName());
-            feeLine.setAmount(plan.getMonthlyFee());
-            invoice.addLineItem(feeLine);
-            total = total.add(plan.getMonthlyFee());
-        }
-
-        invoice.setTotalAmount(total);
-        invoice.setStatus(InvoiceStatus.DRAFT);
-        Invoice saved = invoiceRepository.save(invoice);
-        invoiceEventProducer.publishInvoiceCreated(saved);
-        return saved;
     }
 
     @Transactional

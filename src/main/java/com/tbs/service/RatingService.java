@@ -1,10 +1,12 @@
 package com.tbs.service;
 
+import com.tbs.metrics.BusinessMetrics;
 import com.tbs.model.entity.RatedUsage;
 import com.tbs.model.entity.UsageRecord;
 import com.tbs.rating.RatingEngine;
 import com.tbs.repository.RatedUsageRepository;
 import com.tbs.repository.UsageRecordRepository;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -18,25 +20,35 @@ public class RatingService {
     private final UsageRecordRepository usageRecordRepository;
     private final RatedUsageRepository ratedUsageRepository;
     private final BalanceService balanceService;
+    private final BusinessMetrics businessMetrics;
 
     public RatingService(RatingEngine ratingEngine,
                          UsageRecordRepository usageRecordRepository,
                          RatedUsageRepository ratedUsageRepository,
-                         BalanceService balanceService) {
+                         BalanceService balanceService,
+                         BusinessMetrics businessMetrics) {
         this.ratingEngine = ratingEngine;
         this.usageRecordRepository = usageRecordRepository;
         this.ratedUsageRepository = ratedUsageRepository;
         this.balanceService = balanceService;
+        this.businessMetrics = businessMetrics;
     }
 
     @Transactional
     public RatedUsage rateUsage(Long usageRecordId) {
-        UsageRecord usage = usageRecordRepository.findById(usageRecordId)
-                .orElseThrow(() -> new IllegalArgumentException("Usage record not found with id: " + usageRecordId));
-        if (usage.isRated()) {
-            throw new IllegalStateException("Usage record " + usageRecordId + " is already rated");
+        Timer.Sample sample = businessMetrics.startRatingTimer();
+        try {
+            UsageRecord usage = usageRecordRepository.findById(usageRecordId)
+                    .orElseThrow(() -> new IllegalArgumentException("Usage record not found with id: " + usageRecordId));
+            if (usage.isRated()) {
+                throw new IllegalStateException("Usage record " + usageRecordId + " is already rated");
+            }
+            RatedUsage rated = rate(usage);
+            businessMetrics.incrementUsageRated();
+            return rated;
+        } finally {
+            businessMetrics.stopRatingTimer(sample);
         }
-        return rate(usage);
     }
 
     @Transactional
@@ -44,7 +56,13 @@ public class RatingService {
         List<UsageRecord> pending = usageRecordRepository.findBySubscriberIdAndRatedFalse(subscriberId);
         List<RatedUsage> rated = new ArrayList<>();
         for (UsageRecord usage : pending) {
-            rated.add(rate(usage));
+            Timer.Sample sample = businessMetrics.startRatingTimer();
+            try {
+                rated.add(rate(usage));
+                businessMetrics.incrementUsageRated();
+            } finally {
+                businessMetrics.stopRatingTimer(sample);
+            }
         }
         return rated;
     }
@@ -54,7 +72,13 @@ public class RatingService {
         List<UsageRecord> pending = usageRecordRepository.findByRatedFalse();
         List<RatedUsage> rated = new ArrayList<>();
         for (UsageRecord usage : pending) {
-            rated.add(rate(usage));
+            Timer.Sample sample = businessMetrics.startRatingTimer();
+            try {
+                rated.add(rate(usage));
+                businessMetrics.incrementUsageRated();
+            } finally {
+                businessMetrics.stopRatingTimer(sample);
+            }
         }
         return rated;
     }

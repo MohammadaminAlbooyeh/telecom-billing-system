@@ -1,11 +1,13 @@
 package com.tbs.cdr;
 
 import com.tbs.exception.SubscriberNotFoundException;
+import com.tbs.metrics.BusinessMetrics;
 import com.tbs.model.dto.CdrDTO;
 import com.tbs.model.entity.Subscriber;
 import com.tbs.model.entity.UsageRecord;
 import com.tbs.repository.SubscriberRepository;
 import com.tbs.repository.UsageRecordRepository;
+import io.micrometer.core.instrument.Timer;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,34 +22,57 @@ public class CdrIngestionService {
     private final CdrDeduplicationService cdrDeduplicationService;
     private final SubscriberRepository subscriberRepository;
     private final UsageRecordRepository usageRecordRepository;
+    private final BusinessMetrics businessMetrics;
 
     public CdrIngestionService(CdrParser cdrParser,
                                CdrValidator cdrValidator,
                                CdrDeduplicationService cdrDeduplicationService,
                                SubscriberRepository subscriberRepository,
-                               UsageRecordRepository usageRecordRepository) {
+                               UsageRecordRepository usageRecordRepository,
+                               BusinessMetrics businessMetrics) {
         this.cdrParser = cdrParser;
         this.cdrValidator = cdrValidator;
         this.cdrDeduplicationService = cdrDeduplicationService;
         this.subscriberRepository = subscriberRepository;
         this.usageRecordRepository = usageRecordRepository;
+        this.businessMetrics = businessMetrics;
     }
 
     @Transactional
     public UsageRecord ingest(String rawCdr) {
-        return ingest(cdrParser.parse(rawCdr));
+        Timer.Sample sample = businessMetrics.startCdrIngestionTimer();
+        try {
+            UsageRecord record = ingest(cdrParser.parse(rawCdr));
+            businessMetrics.incrementCdrIngested();
+            return record;
+        } catch (Exception e) {
+            businessMetrics.incrementCdrFailed();
+            throw e;
+        } finally {
+            businessMetrics.stopCdrIngestionTimer(sample);
+        }
     }
 
     @Transactional
     public UsageRecord ingest(CdrDTO cdr) {
-        cdrValidator.validate(cdr);
-        cdrDeduplicationService.checkDuplicate(cdr.getCdrId());
-        Subscriber subscriber = subscriberRepository.findByMsisdn(cdr.getMsisdn())
-                .orElseThrow(() -> new SubscriberNotFoundException(cdr.getMsisdn()));
-        if (!subscriber.isActive()) {
-            throw new IllegalArgumentException("Subscriber is not active: " + cdr.getMsisdn());
+        Timer.Sample sample = businessMetrics.startCdrIngestionTimer();
+        try {
+            cdrValidator.validate(cdr);
+            cdrDeduplicationService.checkDuplicate(cdr.getCdrId());
+            Subscriber subscriber = subscriberRepository.findByMsisdn(cdr.getMsisdn())
+                    .orElseThrow(() -> new SubscriberNotFoundException(cdr.getMsisdn()));
+            if (!subscriber.isActive()) {
+                throw new IllegalArgumentException("Subscriber is not active: " + cdr.getMsisdn());
+            }
+            UsageRecord record = usageRecordRepository.save(toUsageRecord(cdr, subscriber));
+            businessMetrics.incrementCdrIngested();
+            return record;
+        } catch (Exception e) {
+            businessMetrics.incrementCdrFailed();
+            throw e;
+        } finally {
+            businessMetrics.stopCdrIngestionTimer(sample);
         }
-        return usageRecordRepository.save(toUsageRecord(cdr, subscriber));
     }
 
     @Transactional

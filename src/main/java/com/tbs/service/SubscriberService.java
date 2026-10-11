@@ -26,7 +26,7 @@ public class SubscriberService {
     }
 
     @Transactional
-    public Subscriber register(String msisdn, String name, String email, Long planId) {
+    public Subscriber register(String msisdn, String firstName, String lastName, String email, Long planId, String password) {
         if (subscriberRepository.existsByMsisdn(msisdn)) {
             throw new IllegalArgumentException("Subscriber already exists with msisdn: " + msisdn);
         }
@@ -34,8 +34,10 @@ public class SubscriberService {
                 .orElseThrow(() -> new IllegalArgumentException("Plan not found with id: " + planId));
         Subscriber subscriber = new Subscriber();
         subscriber.setMsisdn(msisdn);
-        subscriber.setName(name);
+        subscriber.setFirstName(firstName);
+        subscriber.setLastName(lastName);
         subscriber.setEmail(email);
+        subscriber.setPassword(password);
         subscriber.setPlan(plan);
         subscriber.setActive(true);
         subscriber = subscriberRepository.save(subscriber);
@@ -62,10 +64,13 @@ public class SubscriberService {
     }
 
     @Transactional
-    public Subscriber update(Long id, String name, String email, Long planId) {
+    public Subscriber update(Long id, String firstName, String lastName, String email, Long planId) {
         Subscriber subscriber = getById(id);
-        if (name != null) {
-            subscriber.setName(name);
+        if (firstName != null) {
+            subscriber.setFirstName(firstName);
+        }
+        if (lastName != null) {
+            subscriber.setLastName(lastName);
         }
         if (email != null) {
             subscriber.setEmail(email);

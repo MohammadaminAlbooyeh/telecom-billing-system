@@ -34,7 +34,7 @@ public class SubscriberController {
     @PostMapping
     public ResponseEntity<Subscriber> register(@RequestBody RegisterSubscriberRequest request) {
         Subscriber subscriber = subscriberService.register(
-                request.msisdn(), request.name(), request.email(), request.planId());
+                request.msisdn(), request.firstName(), request.lastName(), request.email(), request.planId(), request.password());
         return ResponseEntity.status(HttpStatus.CREATED).body(subscriber);
     }
 
@@ -55,7 +55,7 @@ public class SubscriberController {
 
     @PutMapping("/{id}")
     public Subscriber update(@PathVariable Long id, @RequestBody UpdateSubscriberRequest request) {
-        return subscriberService.update(id, request.name(), request.email(), request.planId());
+        return subscriberService.update(id, request.firstName(), request.lastName(), request.email(), request.planId());
     }
 
     @PatchMapping("/{id}/active")
@@ -73,10 +73,10 @@ public class SubscriberController {
         return balanceService.getBalance(id);
     }
 
-    public record RegisterSubscriberRequest(String msisdn, String name, String email, Long planId) {
+    public record RegisterSubscriberRequest(String msisdn, String firstName, String lastName, String email, Long planId, String password) {
     }
 
-    public record UpdateSubscriberRequest(String name, String email, Long planId) {
+    public record UpdateSubscriberRequest(String firstName, String lastName, String email, Long planId) {
     }
 
     public record TopUpRequest(BigDecimal amount) {

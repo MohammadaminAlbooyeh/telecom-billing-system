@@ -48,9 +48,30 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: always
+    prometheus:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    export:
+      prometheus:
+        enabled: true
+
+jwt:
+  secret: telecomBillingSystemSecretKeyForJWTTokenGeneration2026
+  expiration: 86400000
+
+batch:
+  schedule:
+    enabled: true
+    cron: "0 0 2 1 * ?"
 
 ---
+
 spring:
   config:
     activate:
@@ -69,3 +90,31 @@ spring:
   flyway:
     enabled: true
     baseline-on-migrate: true
+
+---
+
+spring:
+  config:
+    activate:
+      on-profile: test
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL}
+    driver-class-name: org.postgresql.Driver
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+
+  flyway:
+    enabled: true
+    baseline-on-migrate: true
+
+  kafka:
+    bootstrap-servers: ${SPRING_KAFKA_BOOTSTRAP_SERVERS}
+
+  batch:
+    job:
+      enabled: false

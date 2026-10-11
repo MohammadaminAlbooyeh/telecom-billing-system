@@ -1,6 +1,7 @@
 package com.tbs.service;
 
 import com.tbs.exception.SubscriberNotFoundException;
+import com.tbs.metrics.BusinessMetrics;
 import com.tbs.model.entity.Invoice;
 import com.tbs.model.entity.Plan;
 import com.tbs.model.entity.RatedUsage;
@@ -13,6 +14,7 @@ import com.tbs.repository.InvoiceRepository;
 import com.tbs.repository.RatedUsageRepository;
 import com.tbs.repository.SubscriberRepository;
 import com.tbs.repository.UsageRecordRepository;
+import io.micrometer.core.instrument.Timer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -49,6 +51,15 @@ class InvoiceGenerationServiceTest {
     @Mock
     private InvoiceEventProducer invoiceEventProducer;
 
+    @Mock
+    private BusinessMetrics businessMetrics;
+
+    @Mock
+    private Timer.Sample timerSample;
+
+    @Mock
+    private Timer timer;
+
     @InjectMocks
     private InvoiceGenerationService invoiceGenerationService;
 
@@ -68,6 +79,7 @@ class InvoiceGenerationServiceTest {
                 eq(1L), any(), any())).thenReturn(List.of(usage));
         when(ratedUsageRepository.findByUsageRecordId(9L)).thenReturn(Optional.of(rated));
         when(invoiceRepository.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(businessMetrics.startInvoiceGenerationTimer()).thenReturn(timerSample);
 
         Invoice invoice = invoiceGenerationService.generateInvoice(1L, periodStart, periodEnd);
 
@@ -90,6 +102,7 @@ class InvoiceGenerationServiceTest {
         when(usageRecordRepository.findBySubscriberIdAndRatedTrueAndUsageStartTimeBetween(
                 eq(1L), any(), any())).thenReturn(List.of());
         when(invoiceRepository.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(businessMetrics.startInvoiceGenerationTimer()).thenReturn(timerSample);
 
         Invoice invoice = invoiceGenerationService.generateInvoice(1L, periodStart, periodEnd);
 
@@ -102,6 +115,7 @@ class InvoiceGenerationServiceTest {
         Subscriber subscriber = subscriber(1L, plan("Basic", "50.00"));
         when(subscriberRepository.findById(1L)).thenReturn(Optional.of(subscriber));
         when(invoiceRepository.existsBySubscriberIdAndBillingPeriodEnd(eq(1L), eq(periodEnd))).thenReturn(true);
+        when(businessMetrics.startInvoiceGenerationTimer()).thenReturn(timerSample);
 
         assertThatThrownBy(() -> invoiceGenerationService.generateInvoice(1L, periodStart, periodEnd))
                 .isInstanceOf(IllegalStateException.class)
@@ -111,6 +125,7 @@ class InvoiceGenerationServiceTest {
     @Test
     void generateInvoiceThrowsWhenSubscriberNotFound() {
         when(subscriberRepository.findById(999L)).thenReturn(Optional.empty());
+        when(businessMetrics.startInvoiceGenerationTimer()).thenReturn(timerSample);
 
         assertThatThrownBy(() -> invoiceGenerationService.generateInvoice(999L, periodStart, periodEnd))
                 .isInstanceOf(SubscriberNotFoundException.class);
@@ -128,6 +143,7 @@ class InvoiceGenerationServiceTest {
         when(usageRecordRepository.findBySubscriberIdAndRatedTrueAndUsageStartTimeBetween(
                 eq(1L), any(), any())).thenReturn(List.of());
         when(invoiceRepository.save(any(Invoice.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(businessMetrics.startInvoiceGenerationTimer()).thenReturn(timerSample);
 
         List<Invoice> invoices = invoiceGenerationService.generateInvoicesForAll(periodStart, periodEnd);
 
@@ -164,5 +180,3 @@ class InvoiceGenerationServiceTest {
         return rated;
     }
 }
-
-
