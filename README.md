@@ -172,6 +172,26 @@ docker exec -i tbs-kafka kafka-console-producer.sh \
   --broker-list localhost:9092 --topic cdr-events
 ```
 
+## Spring Batch: Monthly Invoice Job
+
+A manual batch job (`monthlyInvoiceJob`) rates pending usage and generates an invoice for every subscriber. It is **not** auto-run at startup (`spring.batch.job.enabled=false`) so it won't fire on an empty database.
+
+1. **`usageAggregationStep`** (tasklet `UsageAggregationTasklet`) — rates all unrated usage for each active subscriber.
+2. **`monthlyInvoiceStep`** (chunk of 50) — reads subscribers, generates an invoice per subscriber via `InvoiceGenerationService`, and writes results with `InvoiceItemWriter`. Subscribers whose invoice already exists for the period are skipped.
+
+Billing window is taken from job parameters `periodStart`/`periodEnd` (ISO dates); if omitted the current calendar month is used.
+
+### Triggering the job
+
+Trigger via `JobLauncher` with optional period parameters, e.g. using `spring-boot-starter-batch`'s `CommandLineJobRunner`:
+
+```bash
+mvn spring-boot:run \
+  -Dspring-boot.run.arguments="monthlyInvoiceJob periodStart=2026-03-01 periodEnd=2026-03-31"
+```
+
+Or launch programmatically with `JobLauncher.run(job, new JobParametersBuilder().addLocalDate(...).toJobParameters())`.
+
 ## Useful Actuator Endpoints
 
 - `http://localhost:8080/actuator/health`
@@ -180,6 +200,6 @@ docker exec -i tbs-kafka kafka-console-producer.sh \
 ## Notes / Current Limitations
 
 - Kafka messaging (`KafkaConfig`, `CdrEventConsumer`, `InvoiceEventProducer`) is implemented and wired. Startup requires a broker for messaging to be active; the admin/consumer will retry connection if one is absent.
-- The Spring Batch classes (`MonthlyInvoiceJob`, `UsageAggregationTasklet`, `InvoiceItemWriter`, `BatchConfig`) are still empty stubs — the monthly invoice batch job is not yet implemented.
+- The Spring Batch monthly invoice job (`BatchConfig`, `MonthlyInvoiceJob`, `UsageAggregationTasklet`, `InvoiceItemWriter`) is implemented; it is triggered manually via `JobLauncher`.
 - The default H2 profile uses `create-drop`; use the `postgres` profile (or Docker) for persistent schema managed by Flyway.
 
